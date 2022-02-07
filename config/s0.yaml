@@ -6,7 +6,7 @@ train_config:
   exp_name: 's0'
   lr_rate: 0.0005
   w_decay: 0.00001
-  restore: false # Restore for training or evaluation
+  restore: true # Restore for training or evaluation
   tps: 1800 # Restored episode for evaluation
   n_episode: 1800 # Total Training Episode
   batch_size: 4096 # Sample from PER

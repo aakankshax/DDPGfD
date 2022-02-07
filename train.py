@@ -10,6 +10,7 @@ from logger import logger_setup
 import logging
 from os.path import join as opj
 import gym
+import wandb
 
 np.set_printoptions(suppress=True, precision=4)
 
@@ -19,6 +20,7 @@ loggers = ['RLTrainer', 'DDPGfD', 'TP']
 # logging.addLevelName(DEBUG_LLV, 'DEBUGLLV')  # Lower level debugging info
 logging_level = logging.DEBUG  # logging.DEBUG
 
+wandb.init(project='dex_manip_ddpgfd')
 
 def fetch_obs(obs):
     return np.r_[obs['observation'], obs['achieved_goal'], obs['desired_goal']]
@@ -59,7 +61,10 @@ class RLTrainer:
         logger_setup(os.path.join(self.tp.result_path, self.conf.exp_name + '-log.txt'), loggers, logging_level)
         self.logger = logging.getLogger('RLTrainer')
 
+        print('self.conf.device:', self.conf.device)
+
         if torch.cuda.is_available():
+            print('self.conf.device:', self.conf.device)
             torch.cuda.set_device(self.conf.device)  # default 0
             # cudnn.benchmark = True # Faster only for fixed runtime size
             self.logger.info('Use CUDA Device ' + self.conf.device)
@@ -80,8 +85,12 @@ class RLTrainer:
         self.env = gym.make('FetchReach-v1')
         self.logger.info('Environment Loaded')
 
+        print('self.device:', self.device)
+
         self.agent = DDPGfDAgent(self.full_conf.agent_config, self.device)
         self.agent.to(self.device)
+
+        print('agent created')
 
         if self.conf.restore:
             self.restore_progress(eval)
@@ -90,13 +99,16 @@ class RLTrainer:
         self.set_optimizer()
         # Loss Function setting
         reduction = 'none'
+        
+        print('loss function block')
+
         if self.conf.mse_loss:
             self.q_criterion = nn.MSELoss(reduction=reduction)
         else:
             self.q_criterion = nn.SmoothL1Loss(reduction=reduction)
         self.demo2memory()
         self.action_noise = OrnsteinUhlenbeckActionNoise(np.zeros(self.full_conf.agent_config.action_dim),
-                                                         self.full_conf.agent_config.action_noise_std)
+                                                             self.full_conf.agent_config.action_noise_std)
 
     def restore_progress(self, eval=False):
         self.tp.restore_progress(self.conf.tps)  # tps only for restore process from conf
@@ -132,6 +144,8 @@ class RLTrainer:
         if display:
             self.logger.info('Config name ' + self.conf.exp_name)
             self.logger.info('Progress Saved, current episode={}'.format(self.episode))
+        
+        wandb.config.exp_name = self.conf.exp_name
 
     def set_optimizer(self):
         # self.optimizer = getattr(optim, self.conf.optim)(
@@ -239,6 +253,8 @@ class RLTrainer:
                     timeSince(start_time), step, self.conf.pretrain_step, losses_actor / batch_sz,
                                                                           losses_critic / batch_sz, batch_sz,
                                                                           demo_n / batch_sz))
+            wandb.log({'Pretrain Step': step, 'Actor loss': losses_actor / batch_sz, 'Critic loss': losses_critic / batch_sz, 'Batch size': batch_sz, 'Demo ratio': demo_n / batch_sz})
+                
             self.tp.record_step(step, 'pre_train',
                                 {'actor_loss_mean': losses_actor / batch_sz,
                                  'critic_loss_mean': losses_critic / batch_sz,
@@ -313,6 +329,8 @@ class RLTrainer:
                     eps_critic_loss / eps_batch_sz,
                     eps_length, eps_reward, eps_demo_n / eps_batch_sz))
 
+            wandb.log({'Episode': self.episode, 'Actor loss': eps_actor_loss / eps_batch_sz, 'Critic loss': eps_critic_loss / eps_batch_sz, 'Step': eps_length, 'Reward': eps_reward, 'Demo ratio': eps_demo_n / eps_batch_sz})
+                
             # Update target
             self.agent.update_target(self.agent.actor_b, self.agent.actor_t, self.episode)
             self.agent.update_target(self.agent.critic_b, self.agent.critic_t, self.episode)
@@ -342,7 +360,7 @@ class RLTrainer:
         all_reward = []
 
         # Backup Environment state
-
+        print('Here')
         for eps in range(self.conf.eval_episode):  # self.iter start from 1
             # Episodic statistics
             eps_reward = eps_length = 0
@@ -357,7 +375,7 @@ class RLTrainer:
                     s2, r, done, _ = self.env.step(action.numpy())
                     s2 = fetch_obs(s2)
                     s2_tensor = self.agent.obs2tensor(s2)
-                    self.env.render()
+                    # self.env.render()
 
                 # 3. Record episodic statistics
                 eps_reward += r
@@ -375,6 +393,8 @@ class RLTrainer:
             'Eval Episode-{}: Mean Reward={:.3f}, Mena Length={:.3f}'.format(self.episode, np.mean(all_reward),
                                                                              np.mean(all_length)))
 
+        wandb.log({'Eval episode': self.episode, 'Mean reward': np.mean(all_reward), 'Mean Length': np.mean(all_length)})
+            
         if save_fig:
             self.tp.plot_data('eval', self.conf.save_every, self.episode, 'result-eval-{}.png'.format(self.episode),
                               self.conf.exp_name + str(self.conf.exp_idx) + '-Evaluate',
@@ -400,7 +420,7 @@ class RLTrainer:
                     s2, r, done, _ = self.env.step(action)
                     s2 = fetch_obs(s2)
                     s2_tensor = self.agent.obs2tensor(s2)
-                    self.env.render()
+                    # self.env.render()
 
                     demo_record.append((s, action, r, s2, done))
                     if done:
@@ -428,6 +448,7 @@ def main():
     conf_path = args.conf
 
     trainer = RLTrainer(conf_path, args.eval)
+    print('trainer created')
     if args.eval:
         trainer.eval(save_fig=False)
     elif args.collect:
