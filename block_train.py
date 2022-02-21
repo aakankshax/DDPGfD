@@ -24,7 +24,7 @@ loggers = ['RLTrainer', 'DDPGfD', 'TP']
 # logging.addLevelName(DEBUG_LLV, 'DEBUGLLV')  # Lower level debugging info
 logging_level = logging.DEBUG  # logging.DEBUG
 
-wandb.init(project='dex_manip_ddpgfd')
+# wandb.init(project='dex_manip_ddpgfd')
 
 def fetch_obs(obs):
     return np.r_[obs['observation'], obs['achieved_goal'], obs['desired_goal']]
@@ -56,6 +56,9 @@ class RLTrainer:
     def __init__(self, conf_path, eval=False):
         self.full_conf = load_conf(conf_path)
         self.conf = self.full_conf.train_config
+        
+        wandb.init(project='dex_manip_ddpgfd', config=self.full_conf)
+        wandb.config.timestr = timestr
 
         # progress_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'progress')
         # result_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result')
